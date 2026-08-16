@@ -24,14 +24,6 @@ const HARD_TIMEOUT_MS = 45000;
 // یک‌ساله «no longer available» شد و فقط زنجیره جایگزین نجاتش داد.
 const PROVIDERS = [
   {
-    name: "groq",
-    envKey: "GROQ_API_KEY",
-    url: "https://api.groq.com/openai/v1/chat/completions",
-    model: process.env.GROQ_MODEL || "llama-3.3-70b-versatile",
-    style: "openai",
-    good_for: "سریع، کارهای ساده و پرتکرار"
-  },
-  {
     name: "gemini",
     envKey: "GEMINI_API_KEY",
     url: "https://generativelanguage.googleapis.com/v1beta/models/MODEL:generateContent",
@@ -40,6 +32,14 @@ const PROVIDERS = [
     model: process.env.GEMINI_MODEL || "gemini-3.5-flash",
     style: "gemini",
     good_for: "تحلیل سنگین، زمینه بزرگ، دستورپذیری بهتر"
+  },
+  {
+    name: "groq",
+    envKey: "GROQ_API_KEY",
+    url: "https://api.groq.com/openai/v1/chat/completions",
+    model: process.env.GROQ_MODEL || "llama-3.3-70b-versatile",
+    style: "openai",
+    good_for: "سریع، کارهای ساده و پرتکرار"
   },
   {
     name: "openrouter",
@@ -89,7 +89,8 @@ export default async function handler(req) {
         .filter(m => (m.supportedGenerationMethods || []).includes("generateContent"))
         .map(m => m.name.replace("models/", ""))
         .filter(n => n.includes("flash") || n.includes("pro"));
-      return json({ ok: true, current: PROVIDERS[1].model, available: names });
+      const gem = PROVIDERS.find(p => p.name === "gemini");
+      return json({ ok: true, current: gem ? gem.model : null, available: names });
     } catch (e) {
       return json({ ok: false, error: String(e.message || e) }, 502);
     }
