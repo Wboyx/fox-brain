@@ -23,15 +23,17 @@ const HARD_TIMEOUT_MS = 45000;
 // ثابت باشد، روزی بی‌صدا از کار می‌افتد. تجربه واقعی: یک نام مدل
 // یک‌ساله «no longer available» شد و فقط زنجیره جایگزین نجاتش داد.
 const PROVIDERS = [
+  // ترتیب = اولویت. اولی که کلیدش تنظیم شده باشد اول امتحان می‌شود.
+  // نام مدل‌ها با متغیر محیطی قابل تغییر است، چون ارائه‌دهندگان
+  // مرتب مدل‌ها را بازنشسته می‌کنند.
   {
     name: "gemini",
     envKey: "GEMINI_API_KEY",
     url: "https://generativelanguage.googleapis.com/v1beta/models/MODEL:generateContent",
-    // اگر این نام هم منسوخ شد، متغیر GEMINI_MODEL را تنظیم کن.
-    // فهرست زنده: مسیر /models را صدا بزن.
     model: process.env.GEMINI_MODEL || "gemini-3.5-flash",
     style: "gemini",
-    good_for: "تحلیل سنگین، زمینه بزرگ، دستورپذیری بهتر"
+    tier: "strong",
+    good_for: "دستورپذیری بالا، زمینه بزرگ"
   },
   {
     name: "groq",
@@ -39,15 +41,8 @@ const PROVIDERS = [
     url: "https://api.groq.com/openai/v1/chat/completions",
     model: process.env.GROQ_MODEL || "llama-3.3-70b-versatile",
     style: "openai",
-    good_for: "سریع، کارهای ساده و پرتکرار"
-  },
-  {
-    name: "openrouter",
-    envKey: "OPENROUTER_API_KEY",
-    url: "https://openrouter.ai/api/v1/chat/completions",
-    model: process.env.OPENROUTER_MODEL || "meta-llama/llama-3.3-70b-instruct:free",
-    style: "openai",
-    good_for: "نظر دوم با مدل متفاوت"
+    tier: "fast",
+    good_for: "سریع‌ترین، مناسب کار پرتکرار"
   },
   {
     name: "cerebras",
@@ -55,7 +50,53 @@ const PROVIDERS = [
     url: "https://api.cerebras.ai/v1/chat/completions",
     model: process.env.CEREBRAS_MODEL || "llama-3.3-70b",
     style: "openai",
-    good_for: "توان بالا"
+    tier: "strong",
+    good_for: "سهمیه توکن روزانه بسیار بالا"
+  },
+  {
+    name: "mistral",
+    envKey: "MISTRAL_API_KEY",
+    url: "https://api.mistral.ai/v1/chat/completions",
+    model: process.env.MISTRAL_MODEL || "mistral-large-latest",
+    style: "openai",
+    tier: "strong",
+    good_for: "سهمیه ماهانه بزرگ"
+  },
+  {
+    name: "nvidia",
+    envKey: "NVIDIA_API_KEY",
+    url: "https://integrate.api.nvidia.com/v1/chat/completions",
+    model: process.env.NVIDIA_MODEL || "meta/llama-3.3-70b-instruct",
+    style: "openai",
+    tier: "strong",
+    good_for: "نرخ درخواست بالا"
+  },
+  {
+    name: "github",
+    envKey: "GITHUB_MODELS_TOKEN",
+    url: "https://models.inference.ai.azure.com/chat/completions",
+    model: process.env.GITHUB_MODEL || "gpt-4o",
+    style: "openai",
+    tier: "strong",
+    good_for: "دسترسی به مدل‌های سطح بالا"
+  },
+  {
+    name: "openrouter",
+    envKey: "OPENROUTER_API_KEY",
+    url: "https://openrouter.ai/api/v1/chat/completions",
+    model: process.env.OPENROUTER_MODEL || "meta-llama/llama-3.3-70b-instruct:free",
+    style: "openai",
+    tier: "varied",
+    good_for: "دسترسی به مدل‌های متنوع با یک کلید"
+  },
+  {
+    name: "zai",
+    envKey: "ZAI_API_KEY",
+    url: "https://api.z.ai/api/paas/v4/chat/completions",
+    model: process.env.ZAI_MODEL || "glm-4.7-flash",
+    style: "openai",
+    tier: "fast",
+    good_for: "جایگزین سبک و سریع"
   }
 ];
 
