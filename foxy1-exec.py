@@ -36,7 +36,7 @@ AUDIT_LOG = os.path.join(BASE_DIR, "foxy1-exec-audit.log")
 KILL_SWITCH = os.path.join(BASE_DIR, "EXEC_DISABLED")
 BACKUP_ROOT = "/root/foxy1-exec-backups"
 
-VERSION = "4.2.0"
+VERSION = "5.0.0"
 
 # محدودیت‌ها
 EXEC_TIMEOUT = 60          # حداکثر زمان اجرای هر دستور
@@ -348,73 +348,73 @@ def collect_context(cfg):
     return redact("\n\n".join(parts))
 
 
-SYSTEM_PROMPT = """تو فاکسی 1 هستی، دستیار فنی سرور.
+SYSTEM_PROMPT = """تو فاکسی هستی — دستیار فنی شخصی همکار.
 
-قوانین:
+## کی هستی
 
-۱. فارسی ساده و آرام بنویس. کاربر را «همکار» خطاب کن.
-۲. فقط از حروف فارسی و انگلیسی استفاده کن. هیچ حرف چینی، ژاپنی، کره‌ای یا الفبای دیگری در پاسخ نباشد.
-۳. فارسی و انگلیسی را در یک خط مخلوط نکن.
-۴. فقط بر اساس داده داده‌شده نتیجه بگیر. چیزی از خودت نساز.
-۵. حدس را واقعیت جا نزن.
+دو تخصص داری:
 
-اگر بخش «گفت‌وگوی قبلی» وجود دارد، آن را بخوان. وقتی همکار می‌گوید «آن را» یا «همان» یا «حالا اجراش کن»، منظورش چیزی است که در گفت‌وگوی قبلی آمده.
+فاکسی ۱ — اداره و نگهداری سرور: پایش، عیب‌یابی، استقرار امن، شبکه، سرویس‌ها.
+فاکسی ۳ — ساخت: طراحی اتوماسیون، معماری سامانه، کدنویسی، انتخاب زیرساخت.
 
-ولی وضعیت فعلی سرور همیشه بر اطلاعات گفت‌وگوی قبلی اولویت دارد.
+بسته به سؤال همکار، از هر کدام که لازم است استفاده کن. لازم نیست اعلام کنی کدام نقش را داری.
 
-بخش «وضعیت خطا» را ببین:
-- اگر «پاک» است، مشکل فعالی نیست و همین را بگو.
-- اگر «فعال» است، روی همان تمرکز کن.
+## چطور حرف می‌زنی
 
-قالب پاسخ تو دقیقاً این است:
+- فارسی ساده، آرام و دوستانه. کاربر را «همکار» صدا بزن.
+- طبیعی حرف بزن، مثل یک همکار واقعی، نه مثل یک گزارش خشک.
+- فقط از حروف فارسی و انگلیسی استفاده کن. هیچ الفبای دیگری نباشد.
+- فارسی و انگلیسی را در یک خط مخلوط نکن. دستور، مسیر و نام سرویس در کادر جدا.
+- کوتاه جواب بده مگر همکار توضیح بیشتر بخواهد.
+- اگر فقط سلام کرد یا گپ زد، تو هم ساده جواب بده. لازم نیست هر پیام را به تحلیل فنی تبدیل کنی.
+- تعارف طولانی نکن. مستقیم برو سر اصل مطلب.
 
-تشخیص:
-دو یا سه جمله کوتاه.
+## قوانین صداقت
 
-دستور:
-```bash
-یک دستور واقعی اینجا
-```
+- حدس را واقعیت جا نزن. اگر مطمئن نیستی، بگو و بگو چطور می‌شود فهمید.
+- فقط بر اساس داده واقعی نتیجه بگیر. عدد از خودت نساز.
+- وعده قطعی نده.
+- اگر اشتباه کردی، سریع بگو.
+- اگر ایده همکار ایراد دارد، محترمانه ولی صریح بگو.
 
-نتیجه صحیح: یک جمله.
+## ابزارهایی که داری
 
-قواعد دستور:
+می‌توانی دستور بزنی. دو حالت دارد:
 
-- فقط یک دستور بنویس، در یک خط.
-- دستور مخرب ننویس. حذف، فرمت، ری‌بوت و تغییر فایروال ممنوع است.
-- اگر همه‌چیز سالم است، یک دستور بررسی سلامت ساده بنویس.
-- بخش دستور را هرگز خالی نگذار.
+**حالت یک — خواندن داده**
 
-پاسخ حداکثر دوازده خط باشد."""
+اگر برای جواب‌دادن به اطلاعاتی از سرور نیاز داری، این را در پاسخت بنویس:
 
+<read>دستور خواندنی</read>
 
-def ask_brain(cfg, question, context, mode="balanced"):
-    if not cfg["brain_url"] or not cfg["brain_key"]:
-        return None, "دروازه مدل تنظیم نشده است."
+دستور اجرا می‌شود و نتیجه‌اش به تو داده می‌شود، بعد ادامه گفت‌وگو را می‌نویسی. همکار درگیر این مرحله نمی‌شود.
 
-    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    hist = history_block()
-    hist_part = f"{hist}\n\n" if hist else ""
-    payload = json.dumps({
-        "system": SYSTEM_PROMPT,
-        "prompt": f"زمان فعلی: {now}\n\n{hist_part}سؤال همکار:\n{question}\n\nوضعیت سرور:\n\n{context}",
-        "mode": mode,
-    }).encode("utf-8")
+از این برای هر چیزی که لازم داری استفاده کن: وضعیت سرویس، حافظه، دیسک، لاگ، شبکه، پورت‌ها.
 
-    req = urllib.request.Request(
-        f"{cfg['brain_url']}/ask",
-        data=payload,
-        headers={"content-type": "application/json", "x-brain-key": cfg["brain_key"]},
-    )
-    try:
-        with urllib.request.urlopen(req, timeout=90) as r:
-            d = json.loads(r.read().decode("utf-8"))
-    except Exception as exc:
-        return None, f"اتصال به دروازه ناموفق: {exc}"
+**حالت دو — تغییر**
 
-    if not d.get("ok"):
-        return None, f"مدل پاسخ نداد: {d.get('error')}"
-    return d, None
+اگر می‌خواهی چیزی را عوض کنی مثل ری‌استارت سرویس، این را بنویس:
+
+<change>دستور</change>
+
+این یکی به همکار نشان داده می‌شود و منتظر تأیید او می‌ماند. پیش از نوشتنش، توضیح بده چرا لازم است.
+
+## قواعد استفاده از ابزار
+
+- در هر پاسخ حداکثر یک دستور بنویس.
+- اگر جواب سؤال را از قبل می‌دانی یا در گفت‌وگوی قبلی هست، دستور نزن.
+- برای گپ ساده و سؤال عمومی دستور نزن.
+- دستور مخرب هرگز ننویس. حذف، فرمت، ری‌بوت و تغییر فایروال ممنوع است.
+- اگر دستوری زدی، بعد از دیدن نتیجه به زبان ساده توضیحش بده. خروجی خام را تکرار نکن.
+
+## چیزهایی که می‌دانی
+
+سرور همکار در ایران است. دامنه‌های زیادی مسدودند، پس ارتباط‌های بیرونی از پل‌های واسط عبور می‌کنند.
+
+قانون قرمز: هیچ ترافیک کاربر نهایی نباید از سرور ایران عبور کند. اگر چنین چیزی پیشنهاد شد، مخالفت کن.
+
+پیش از هر تغییر، بکاپ. این قانون استثنا ندارد."""
+
 
 
 def consult_brain(cfg, question, context):
@@ -458,13 +458,139 @@ AGREEMENT_LABEL = {
 }
 
 
-def extract_command(answer):
-    """استخراج دستور از کادر کد پاسخ مدل."""
-    m = re.search(r"```(?:bash|sh)?\s*\n(.+?)\n```", answer, re.DOTALL)
-    if not m:
-        return None
-    lines = [l.strip() for l in m.group(1).strip().splitlines() if l.strip() and not l.strip().startswith("#")]
-    return lines[0] if lines else None
+# =====================================================================
+# حلقه عاملی
+#
+# مدل می‌تواند وسط پاسخ درخواست خواندن داده بدهد. آن دستور اجرا
+# می‌شود و نتیجه‌اش برمی‌گردد تا مدل ادامه بدهد.
+#
+# محدودیت‌ها عمدی‌اند:
+#   - فقط دستور خواندنی، تغییردهنده هرگز خودکار اجرا نمی‌شود
+#   - سقف تعداد دور، وگرنه ممکن است در حلقه بیفتد
+#   - همان لایه ایمنی کد اعمال می‌شود، بدون استثنا
+# =====================================================================
+
+MAX_AGENT_STEPS = 4        # سقف دور خواندن در یک پاسخ
+AGENT_OUTPUT_LIMIT = 1800  # سقف طول خروجی که به مدل داده می‌شود
+
+READ_TAG = re.compile(r"<read>\s*(.+?)\s*</read>", re.DOTALL)
+CHANGE_TAG = re.compile(r"<change>\s*(.+?)\s*</change>", re.DOTALL)
+
+
+def strip_tags(text):
+    """حذف برچسب‌های ابزار از متنی که به همکار نشان داده می‌شود."""
+    if not text:
+        return text
+    out = READ_TAG.sub("", text)
+    out = CHANGE_TAG.sub("", out)
+    return re.sub(r"\n{3,}", "\n\n", out).strip()
+
+
+def run_agent(cfg, question, mode="balanced"):
+    """
+    گفت‌وگو با مدل، همراه با اجازه خواندن داده.
+
+    خروجی: (متن نهایی, دستور تغییر یا None, نام مدل, فهرست دستورهای خوانده‌شده)
+    """
+    context_first = collect_context(cfg)
+    hist = history_block()
+    hist_part = f"{hist}\n\n" if hist else ""
+    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+    conversation = (
+        f"زمان فعلی: {now}\n\n"
+        f"{hist_part}"
+        f"پیام همکار:\n{question}\n\n"
+        f"وضعیت پایه سرور در این لحظه:\n\n{context_first}"
+    )
+
+    visible_parts = []
+    read_log = []
+    provider = "?"
+
+    for step in range(MAX_AGENT_STEPS):
+        data, err = ask_raw(cfg, conversation, mode)
+        if err:
+            return None, None, None, err
+
+        answer = data["answer"]
+        provider = data["provider"]
+
+        # آیا می‌خواهد چیزی را تغییر دهد؟
+        ch = CHANGE_TAG.search(answer)
+        if ch:
+            visible_parts.append(strip_tags(answer))
+            return "\n\n".join(p for p in visible_parts if p), ch.group(1).strip(), provider, read_log
+
+        # آیا می‌خواهد داده بخواند؟
+        rd = READ_TAG.search(answer)
+        if not rd:
+            visible_parts.append(strip_tags(answer))
+            return "\n\n".join(p for p in visible_parts if p), None, provider, read_log
+
+        cmd = rd.group(1).strip()
+        allowed, reason, needs_backup = check_command(cmd)
+
+        if not allowed or needs_backup:
+            why = reason if not allowed else "این دستور تغییردهنده است و خودکار اجرا نمی‌شود"
+            audit("AGENT_READ_BLOCKED", f"{why} | {cmd}")
+            conversation += (
+                f"\n\n---\nتو خواستی این را اجرا کنی:\n{cmd}\n"
+                f"اجرا نشد. دلیل: {why}\n"
+                f"با همین اطلاعاتی که داری جواب بده یا دستور خواندنی دیگری امتحان کن."
+            )
+            continue
+
+        code, out, took = execute(cmd)
+        out = redact(strip_foreign(out)) or "(بدون خروجی)"
+        if len(out) > AGENT_OUTPUT_LIMIT:
+            out = out[:AGENT_OUTPUT_LIMIT] + "\n... (بریده شد)"
+
+        read_log.append({"cmd": cmd, "code": code, "took": took})
+        audit("AGENT_READ", f"rc={code} t={took}s | {cmd}")
+
+        pre = strip_tags(answer)
+        if pre:
+            visible_parts.append(pre)
+
+        conversation += (
+            f"\n\n---\nتو این را اجرا کردی:\n{cmd}\n\n"
+            f"نتیجه (کد خروج {code}):\n{out}\n\n"
+            f"حالا با این اطلاعات به همکار جواب بده. اگر باز هم داده لازم داری "
+            f"یک دستور خواندنی دیگر بزن، وگرنه جواب نهایی را بنویس."
+        )
+
+    # سقف دور پر شد
+    visible_parts.append("چند بار بررسی کردم ولی به نتیجه قطعی نرسیدم. سؤالت را دقیق‌تر بپرس.")
+    return "\n\n".join(p for p in visible_parts if p), None, provider, read_log
+
+
+def ask_raw(cfg, prompt_text, mode="balanced"):
+    """تماس مستقیم با دروازه، بدون ساختن دوباره زمینه."""
+    if not cfg["brain_url"] or not cfg["brain_key"]:
+        return None, "دروازه مدل تنظیم نشده است."
+
+    payload = json.dumps({
+        "system": SYSTEM_PROMPT,
+        "prompt": prompt_text[:60000],
+        "mode": mode,
+    }).encode("utf-8")
+
+    req = urllib.request.Request(
+        f"{cfg['brain_url']}/ask",
+        data=payload,
+        headers={"content-type": "application/json", "x-brain-key": cfg["brain_key"]},
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=90) as r:
+            d = json.loads(r.read().decode("utf-8"))
+    except Exception as exc:
+        return None, f"اتصال به دروازه ناموفق: {exc}"
+
+    if not d.get("ok"):
+        return None, f"مدل پاسخ نداد: {d.get('error')}"
+    return d, None
+
 
 
 # =====================================================================
@@ -619,18 +745,18 @@ def handle_message(cfg, msg):
 
     if text in ("/start", "/help"):
         send(cfg, (
-            f"🦊 <b>فاکسی 1 — فاز دو</b>\nنسخه <code>{VERSION}</code>\n\n"
-            "سؤالت را بنویس. وضعیت سرور را بررسی می‌کنم، تحلیل می‌دهم و "
-            "اگر دستوری لازم بود، برای تأیید تو می‌فرستم.\n\n"
-            "<b>دستورها</b>\n"
-            "<code>/status</code> وضعیت فعلی\n"
-            "<code>/consult سؤال</code> نظر دو مدل مستقل\n"
-            "<code>/memory</code> دیدن حافظه گفت‌وگو\n"
-            "<code>/new</code> پاک‌کردن حافظه و شروع تازه\n"
-            "<code>/off</code> قفل کردن اجرا\n"
-            "<code>/on</code> باز کردن قفل\n\n"
-            "سؤال‌های پرریسک مثل ری‌استارت و تغییر، خودکار از دو مدل نظر می‌گیرند.\n\n"
-            "هیچ دستوری بدون تأیید تو اجرا نمی‌شود."
+            f"🦊 <b>سلام همکار</b>\n\n"
+            f"من فاکسی‌ام. با من راحت حرف بزن — لازم نیست دستور بدهی.\n\n"
+            f"هر چیزی درباره سرور بپرسی، خودم می‌روم بررسی می‌کنم و جواب می‌دهم. "
+            f"اگر لازم باشد چیزی را تغییر بدهم، اول از تو می‌پرسم.\n\n"
+            f"در ساخت و طراحی اتوماسیون هم کمکت می‌کنم.\n\n"
+            f"<b>چند دستور مفید</b>\n"
+            f"<code>/status</code> وضعیت کوتاه\n"
+            f"<code>/consult سؤال</code> نظر دو مدل مستقل\n"
+            f"<code>/memory</code> حافظه گفت‌وگو\n"
+            f"<code>/new</code> شروع تازه\n"
+            f"<code>/off</code> قفل اضطراری اجرا\n\n"
+            f"<i>نسخه {VERSION}</i>"
         ))
         return
 
@@ -678,7 +804,12 @@ def handle_message(cfg, msg):
         send(cfg, "🔓 قفل برداشته شد.")
         return
 
-    # تشخیص درخواست مشورت چندمدلی
+    # ------------------------------------------------------------------
+    # حالت گفت‌وگو
+    # مدل خودش تصمیم می‌گیرد چه داده‌ای لازم دارد و می‌خواند.
+    # تأیید فقط برای تغییر لازم است، نه برای خواندن.
+    # ------------------------------------------------------------------
+
     force_consult = False
     for prefix in ("/consult ", "مشورت ", "دو مدل "):
         if text.startswith(prefix):
@@ -686,96 +817,85 @@ def handle_message(cfg, msg):
             text = text[len(prefix):].strip()
             break
 
-    # کلمات کلیدی پرریسک — این‌ها خودکار مشورت می‌گیرند
-    RISKY_WORDS = ["ری‌استارت", "ریستارت", "restart", "تغییر", "آپدیت", "بروزرسانی",
-                   "نصب", "حذف", "پاک", "اصلاح", "درست کن", "رفع", "fix", "stop", "متوقف"]
-    auto_consult = any(w in text for w in RISKY_WORDS)
-    use_consult = force_consult or auto_consult
-
     history_add("user", text)
 
-    if use_consult:
-        send(cfg, "⏳ سؤال پرریسک است — از دو مدل مستقل نظر می‌گیرم...")
-    else:
-        send(cfg, "⏳ در حال بررسی وضعیت سرور...")
+    # سؤال کوتاه و ساده نیازی به مدل کند ندارد
+    simple = len(text) < 60 and not any(
+        w in text for w in ["چرا", "تحلیل", "بررسی عمیق", "مقایسه", "علت", "مشکل"]
+    )
+    mode = "fast" if simple else "balanced"
 
-    context = collect_context(cfg)
-
-    if use_consult:
+    if force_consult:
+        send(cfg, "⏳ از دو مدل مستقل نظر می‌گیرم...")
+        context = collect_context(cfg)
         cdata, err = consult_brain(cfg, text, context)
         if err:
-            # اگر مشورت شکست خورد، به حالت تک‌مدلی برگرد
             audit("CONSULT_FALLBACK", err)
-            data, err2 = ask_brain(cfg, text, context)
-            if err2:
-                send(cfg, f"❌ {err2}")
-                return
-            answer = data["answer"]
-            cmd = extract_command(answer)
-            footer = f"\n\n<i>مدل: {data['provider']} (مشورت ناموفق بود)</i>"
+            send(cfg, f"مشورت جواب نداد، خودم بررسی می‌کنم...")
         else:
             return handle_consult_result(cfg, cdata)
-    else:
-        # سؤال کوتاه و ساده نیازی به مدل کند ندارد
-        simple = len(text) < 60 and not any(
-            w in text for w in ["چرا", "تحلیل", "بررسی عمیق", "مقایسه", "علت"]
-        )
-        data, err = ask_brain(cfg, text, context, mode="fast" if simple else "balanced")
-        if err:
-            send(cfg, f"❌ {err}")
-            return
-        answer = data["answer"]
-        cmd = extract_command(answer)
-        footer = f"\n\n<i>مدل: {data['provider']}</i>"
 
-    if not cmd:
-        history_add("assistant", answer)
-        send(cfg, f"{md_to_html(answer)}{footer}")
+    tg(cfg, "sendChatAction", {"chat_id": cfg["chat_id"], "action": "typing"})
+
+    answer, change_cmd, provider, read_log = run_agent(cfg, text, mode)
+
+    if answer is None:
+        send(cfg, f"❌ {read_log}")
         return
 
-    allowed, reason, needs_backup = check_command(cmd)
+    # نشان‌دادن اینکه چه چیزی بررسی شده — شفافیت مهم است
+    steps = ""
+    if read_log:
+        lines = [f"  {r['cmd'][:56]}" for r in read_log]
+        steps = "\n\n<i>بررسی شد:</i>\n<pre>" + "\n".join(lines) + "</pre>"
+
+    footer = f"\n\n<i>{provider}</i>"
+
+    if not change_cmd:
+        history_add("assistant", answer)
+        send(cfg, f"{md_to_html(answer)}{steps}{footer}")
+        return
+
+    # مدل می‌خواهد چیزی را تغییر دهد — اینجا تأیید لازم است
+    allowed, reason, needs_backup = check_command(change_cmd)
 
     if not allowed:
-        audit("BLOCKED", f"{reason} | {cmd}")
+        audit("BLOCKED", f"{reason} | {change_cmd}")
+        history_add("assistant", answer, cmd=change_cmd)
         send(cfg, (
-            f"{md_to_html(answer)}\n\n"
-            f"🛑 <b>دستور پیشنهادی مسدود شد</b>\n\n"
-            f"دلیل:\n<code>{reason}</code>\n\n"
-            f"دستور:\n<pre>{cmd}</pre>\n\n"
-            f"این دستور اجرا نمی‌شود. اگر واقعاً لازم است، خودت دستی بررسی کن.{footer}"
+            f"{md_to_html(answer)}{steps}\n\n"
+            f"🛑 <b>این دستور مسدود شد</b>\n\n"
+            f"دلیل:\n<code>{reason}</code>\n\n<pre>{change_cmd}</pre>{footer}"
         ))
         return
 
     if os.path.exists(KILL_SWITCH):
-        send(cfg, f"{md_to_html(answer)}\n\n🔒 اجرا قفل است. برای باز کردن: <code>/on</code>{footer}")
+        send(cfg, f"{md_to_html(answer)}{steps}\n\n🔒 اجرا قفل است. برای باز کردن: <code>/on</code>{footer}")
         return
 
     if not rate_ok():
-        send(cfg, f"{md_to_html(answer)}\n\n⚠️ سقف {MAX_EXEC_PER_HOUR} اجرا در ساعت پر شده است.{footer}")
+        send(cfg, f"{md_to_html(answer)}{steps}\n\n⚠️ سقف {MAX_EXEC_PER_HOUR} اجرا در ساعت پر شده است.{footer}")
         return
 
     token = f"x{int(time.time() * 1000) % 100000000}"
-    PENDING[token] = {"cmd": cmd, "needs_backup": needs_backup, "created": time.time()}
+    PENDING[token] = {"cmd": change_cmd, "needs_backup": needs_backup, "created": time.time()}
 
-    badge = "🟠 تغییردهنده — بکاپ گرفته می‌شود" if needs_backup else "🟢 فقط خواندنی"
+    badge = "🟠 تغییردهنده — بکاپ گرفته می‌شود" if needs_backup else "🟢 خواندنی"
     keyboard = [[
-        {"text": "✅ تأیید و اجرا", "callback_data": f"ok:{token}"},
-        {"text": "❌ لغو", "callback_data": f"no:{token}"},
+        {"text": "✅ انجامش بده", "callback_data": f"ok:{token}"},
+        {"text": "❌ نه", "callback_data": f"no:{token}"},
     ]]
 
     r = send(cfg, (
-        f"{md_to_html(answer)}\n\n"
-        f"───────────────\n"
-        f"<b>دستور آماده اجراست</b>\n\n"
-        f"<pre>{cmd}</pre>\n\n"
-        f"نوع: {badge}\n"
-        f"اعتبار: ۵ دقیقه{footer}"
+        f"{md_to_html(answer)}{steps}\n\n"
+        f"───────────────\n<pre>{change_cmd}</pre>\n\n"
+        f"{badge} | اعتبار ۵ دقیقه{footer}"
     ), keyboard)
 
     if r.get("ok"):
         PENDING[token]["msg_id"] = r["result"]["message_id"]
-    history_add("assistant", answer, cmd=cmd)
-    audit("PROPOSED", cmd)
+    history_add("assistant", answer, cmd=change_cmd)
+    audit("PROPOSED", change_cmd)
 
 
 def handle_consult_result(cfg, cdata):
@@ -790,7 +910,7 @@ def handle_consult_result(cfg, cdata):
     for r in results:
         parts.append(
             f"───────────────\n"
-            f"<b>{r['provider']}</b>\n{md_to_html(r['answer'])}\n"
+            f"<b>{r['provider']}</b>\n{md_to_html(strip_tags(r['answer']))}\n"
         )
 
     # ------------------------------------------------------------------
@@ -799,6 +919,16 @@ def handle_consult_result(cfg, cdata):
     # دستور خواندنی بر دستور تغییردهنده ارجحیت دارد، چون اگر دو مدل
     # هم‌نظر نیستند یعنی هنوز تشخیص قطعی نیست و اول باید بررسی کرد.
     # ------------------------------------------------------------------
+    # اگر مدل از برچسب استفاده کرده، از همان بخوان
+    for c in cmds:
+        if not c.get("command"):
+            for r in results:
+                if r["provider"] == c["provider"]:
+                    mm = CHANGE_TAG.search(r["answer"]) or READ_TAG.search(r["answer"])
+                    if mm:
+                        c["command"] = mm.group(1).strip()
+                    break
+
     valid = [c for c in cmds if c.get("command")]
     chosen = None
     chosen_by = None
