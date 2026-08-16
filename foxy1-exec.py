@@ -36,7 +36,7 @@ AUDIT_LOG = os.path.join(BASE_DIR, "foxy1-exec-audit.log")
 KILL_SWITCH = os.path.join(BASE_DIR, "EXEC_DISABLED")
 BACKUP_ROOT = "/root/foxy1-exec-backups"
 
-VERSION = "3.1.0"
+VERSION = "4.0.0"
 
 # محدودیت‌ها
 EXEC_TIMEOUT = 60          # حداکثر زمان اجرای هر دستور
@@ -338,6 +338,10 @@ SYSTEM_PROMPT = """تو فاکسی 1 هستی، دستیار فنی سرور.
 ۳. فقط بر اساس داده داده‌شده نتیجه بگیر. چیزی از خودت نساز.
 ۴. حدس را واقعیت جا نزن.
 
+اگر بخش «گفت‌وگوی قبلی» وجود دارد، آن را بخوان. وقتی همکار می‌گوید «آن را» یا «همان» یا «حالا اجراش کن»، منظورش چیزی است که در گفت‌وگوی قبلی آمده.
+
+ولی وضعیت فعلی سرور همیشه بر اطلاعات گفت‌وگوی قبلی اولویت دارد.
+
 بخش «وضعیت خطا» را ببین:
 - اگر «پاک» است، مشکل فعالی نیست و همین را بگو.
 - اگر «فعال» است، روی همان تمرکز کن.
@@ -369,9 +373,11 @@ def ask_brain(cfg, question, context):
         return None, "دروازه مدل تنظیم نشده است."
 
     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    hist = history_block()
+    hist_part = f"{hist}\n\n" if hist else ""
     payload = json.dumps({
         "system": SYSTEM_PROMPT,
-        "prompt": f"زمان فعلی: {now}\n\nسؤال همکار:\n{question}\n\nوضعیت سرور:\n\n{context}",
+        "prompt": f"زمان فعلی: {now}\n\n{hist_part}سؤال همکار:\n{question}\n\nوضعیت سرور:\n\n{context}",
     }).encode("utf-8")
 
     req = urllib.request.Request(
@@ -399,9 +405,11 @@ def consult_brain(cfg, question, context):
         return None, "دروازه مدل تنظیم نشده است."
 
     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    hist = history_block()
+    hist_part = f"{hist}\n\n" if hist else ""
     payload = json.dumps({
         "system": SYSTEM_PROMPT,
-        "prompt": f"زمان فعلی: {now}\n\nسؤال همکار:\n{question}\n\nوضعیت سرور:\n\n{context}",
+        "prompt": f"زمان فعلی: {now}\n\n{hist_part}سؤال همکار:\n{question}\n\nوضعیت سرور:\n\n{context}",
     }).encode("utf-8")
 
     req = urllib.request.Request(
@@ -488,6 +496,61 @@ def execute(cmd):
 PENDING = {}       # {token: {"cmd", "needs_backup", "created", "msg_id"}}
 EXEC_TIMES = []    # زمان اجراهای اخیر برای محدودیت نرخ
 
+# ---------------------------------------------------------------------
+# حافظه گفت‌وگو
+#
+# چرا لازم است: بدون آن هر سؤال از صفر شروع می‌شود و کاربر نمی‌تواند
+# بگوید «حالا آن را ری‌استارت کن». مرجع ضمیر گم می‌شود.
+#
+# چرا محدود است: حافظه بی‌نهایت سه مشکل دارد — مصرف توکن بالا،
+# کند شدن پاسخ، و خطر اینکه اطلاعات کهنه با وضعیت فعلی قاطی شود.
+# ---------------------------------------------------------------------
+HISTORY = []              # [{"role", "text", "cmd", "output", "at"}]
+MAX_HISTORY_TURNS = 6     # حداکثر نوبت نگهداری
+HISTORY_TTL = 1800        # اعتبار حافظه به ثانیه، نیم ساعت
+
+
+def history_add(role, text, cmd=None, output=None):
+    HISTORY.append({
+        "role": role,
+        "text": (text or "")[:600],
+        "cmd": cmd,
+        "output": (output or "")[:400] if output else None,
+        "at": time.time(),
+    })
+    while len(HISTORY) > MAX_HISTORY_TURNS * 2:
+        HISTORY.pop(0)
+
+
+def history_prune():
+    """حذف نوبت‌های کهنه — اطلاعات قدیمی گمراه‌کننده است."""
+    now = time.time()
+    fresh = [h for h in HISTORY if now - h["at"] < HISTORY_TTL]
+    HISTORY[:] = fresh
+
+
+def history_block():
+    """ساخت متن حافظه برای فرستادن به مدل."""
+    history_prune()
+    if not HISTORY:
+        return ""
+
+    lines = []
+    for h in HISTORY:
+        age = int((time.time() - h["at"]) / 60)
+        who = "همکار" if h["role"] == "user" else "تو"
+        lines.append(f"[{age} دقیقه پیش] {who}: {h['text']}")
+        if h.get("cmd"):
+            lines.append(f"  دستور اجراشده: {h['cmd']}")
+        if h.get("output"):
+            lines.append(f"  خروجی: {h['output'][:200]}")
+
+    return (
+        "### گفت‌وگوی قبلی در همین جلسه\n"
+        + "\n".join(lines)
+        + "\n\nاگر همکار به چیزی در گفت‌وگوی بالا اشاره کرد، منظورش همان است."
+    )
+
 
 def rate_ok():
     global EXEC_TIMES
@@ -514,6 +577,8 @@ def handle_message(cfg, msg):
             "<b>دستورها</b>\n"
             "<code>/status</code> وضعیت فعلی\n"
             "<code>/consult سؤال</code> نظر دو مدل مستقل\n"
+            "<code>/memory</code> دیدن حافظه گفت‌وگو\n"
+            "<code>/new</code> پاک‌کردن حافظه و شروع تازه\n"
             "<code>/off</code> قفل کردن اجرا\n"
             "<code>/on</code> باز کردن قفل\n\n"
             "سؤال‌های پرریسک مثل ری‌استارت و تغییر، خودکار از دو مدل نظر می‌گیرند.\n\n"
@@ -524,7 +589,30 @@ def handle_message(cfg, msg):
     if text == "/status":
         locked = "🔒 قفل است" if os.path.exists(KILL_SWITCH) else "🔓 باز است"
         svc = "\n".join(f"{s}: {run(f'systemctl is-active {s}')}" for s in cfg["services"])
-        send(cfg, f"<b>وضعیت</b>\n\nاجرا: {locked}\nاجرا در ساعت اخیر: {len(EXEC_TIMES)} از {MAX_EXEC_PER_HOUR}\n\n<pre>{svc}</pre>")
+        history_prune()
+        send(cfg, (
+            f"<b>وضعیت</b>\n\nاجرا: {locked}\n"
+            f"اجرا در ساعت اخیر: {len(EXEC_TIMES)} از {MAX_EXEC_PER_HOUR}\n"
+            f"حافظه گفت‌وگو: {len(HISTORY)} پیام\n\n<pre>{svc}</pre>"
+        ))
+        return
+
+    if text in ("/new", "/reset", "/clear"):
+        HISTORY.clear()
+        send(cfg, "🧹 حافظه گفت‌وگو پاک شد. از اینجا تازه شروع می‌کنیم.")
+        return
+
+    if text == "/memory":
+        history_prune()
+        if not HISTORY:
+            send(cfg, "حافظه خالی است.")
+            return
+        lines = []
+        for h in HISTORY:
+            age = int((time.time() - h["at"]) / 60)
+            who = "شما" if h["role"] == "user" else "فاکسی"
+            lines.append(f"[{age}د] {who}: {h['text'][:70]}")
+        send(cfg, f"<b>حافظه گفت‌وگو</b>\n\n<pre>" + "\n".join(lines) + "</pre>")
         return
 
     if text == "/off":
@@ -553,6 +641,8 @@ def handle_message(cfg, msg):
                    "نصب", "حذف", "پاک", "اصلاح", "درست کن", "رفع", "fix", "stop", "متوقف"]
     auto_consult = any(w in text for w in RISKY_WORDS)
     use_consult = force_consult or auto_consult
+
+    history_add("user", text)
 
     if use_consult:
         send(cfg, "⏳ سؤال پرریسک است — از دو مدل مستقل نظر می‌گیرم...")
@@ -585,6 +675,7 @@ def handle_message(cfg, msg):
         footer = f"\n\n<i>مدل: {data['provider']}</i>"
 
     if not cmd:
+        history_add("assistant", answer)
         send(cfg, f"{md_to_html(answer)}{footer}")
         return
 
@@ -629,6 +720,7 @@ def handle_message(cfg, msg):
 
     if r.get("ok"):
         PENDING[token]["msg_id"] = r["result"]["message_id"]
+    history_add("assistant", answer, cmd=cmd)
     audit("PROPOSED", cmd)
 
 
@@ -731,6 +823,8 @@ def handle_consult_result(cfg, cdata):
     r = send(cfg, "\n".join(parts), keyboard)
     if r.get("ok"):
         PENDING[token]["msg_id"] = r["result"]["message_id"]
+    summary = results[0]["answer"] if results else ""
+    history_add("assistant", summary, cmd=chosen)
     audit("CONSULT_PROPOSED", f"{agreement} | {chosen}")
 
 
@@ -764,6 +858,7 @@ def handle_callback(cfg, cb):
     if action == "no":
         del PENDING[token]
         answer_cb(cfg, cb_id, "لغو شد")
+        history_add("assistant", "همکار این دستور را لغو کرد", cmd=cmd)
         audit("CANCELLED", cmd)
         edit(cfg, msg_id, f"❌ <b>لغو شد</b>\n\n<pre>{cmd}</pre>")
         return
@@ -801,6 +896,8 @@ def handle_callback(cfg, cb):
     out = redact(out) or "(بدون خروجی)"
     if len(out) > MAX_OUTPUT_CHARS:
         out = out[:MAX_OUTPUT_CHARS] + "\n... (بریده شد)"
+
+    history_add("assistant", f"دستور اجرا شد با کد خروج {code}", cmd=cmd, output=out)
 
     icon = "✅" if code == 0 else "⚠️"
     body = (
