@@ -36,7 +36,7 @@ AUDIT_LOG = os.path.join(BASE_DIR, "foxy1-exec-audit.log")
 KILL_SWITCH = os.path.join(BASE_DIR, "EXEC_DISABLED")
 BACKUP_ROOT = "/root/foxy1-exec-backups"
 
-VERSION = "2.0.0"
+VERSION = "3.0.0"
 
 # محدودیت‌ها
 EXEC_TIMEOUT = 60          # حداکثر زمان اجرای هر دستور
@@ -390,6 +390,45 @@ def ask_brain(cfg, question, context):
     return d, None
 
 
+def consult_brain(cfg, question, context):
+    """
+    مشورت چندمدلی — برای تصمیم‌های پرریسک.
+    دو مدل مستقل نظر می‌دهند و نتیجه مقایسه می‌شود.
+    """
+    if not cfg["brain_url"] or not cfg["brain_key"]:
+        return None, "دروازه مدل تنظیم نشده است."
+
+    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    payload = json.dumps({
+        "system": SYSTEM_PROMPT,
+        "prompt": f"زمان فعلی: {now}\n\nسؤال همکار:\n{question}\n\nوضعیت سرور:\n\n{context}",
+    }).encode("utf-8")
+
+    req = urllib.request.Request(
+        f"{cfg['brain_url']}/consult",
+        data=payload,
+        headers={"content-type": "application/json", "x-brain-key": cfg["brain_key"]},
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=120) as r:
+            d = json.loads(r.read().decode("utf-8"))
+    except Exception as exc:
+        return None, f"اتصال به دروازه ناموفق: {exc}"
+
+    if not d.get("ok"):
+        return None, f"مشورت ناموفق: {d.get('error')}"
+    return d, None
+
+
+AGREEMENT_LABEL = {
+    "identical":       ("🟢", "هر دو مدل دقیقاً یک دستور پیشنهاد دادند"),
+    "similar":         ("🟡", "هر دو مدل از یک ابزار استفاده کردند ولی جزئیات فرق دارد"),
+    "different":       ("🔴", "دو مدل نظر متفاوت دادند — با احتیاط تصمیم بگیر"),
+    "no_command":      ("⚪", "هیچ‌کدام دستوری پیشنهاد ندادند"),
+    "single_response": ("🟠", "فقط یک مدل پاسخ داد"),
+}
+
+
 def extract_command(answer):
     """استخراج دستور از کادر کد پاسخ مدل."""
     m = re.search(r"```(?:bash|sh)?\s*\n(.+?)\n```", answer, re.DOTALL)
@@ -474,8 +513,10 @@ def handle_message(cfg, msg):
             "اگر دستوری لازم بود، برای تأیید تو می‌فرستم.\n\n"
             "<b>دستورها</b>\n"
             "<code>/status</code> وضعیت فعلی\n"
+            "<code>/consult سؤال</code> نظر دو مدل مستقل\n"
             "<code>/off</code> قفل کردن اجرا\n"
             "<code>/on</code> باز کردن قفل\n\n"
+            "سؤال‌های پرریسک مثل ری‌استارت و تغییر، خودکار از دو مدل نظر می‌گیرند.\n\n"
             "هیچ دستوری بدون تأیید تو اجرا نمی‌شود."
         ))
         return
@@ -499,18 +540,49 @@ def handle_message(cfg, msg):
         send(cfg, "🔓 قفل برداشته شد.")
         return
 
-    # پرسش از مدل
-    send(cfg, "⏳ در حال بررسی وضعیت سرور...")
+    # تشخیص درخواست مشورت چندمدلی
+    force_consult = False
+    for prefix in ("/consult ", "مشورت ", "دو مدل "):
+        if text.startswith(prefix):
+            force_consult = True
+            text = text[len(prefix):].strip()
+            break
+
+    # کلمات کلیدی پرریسک — این‌ها خودکار مشورت می‌گیرند
+    RISKY_WORDS = ["ری‌استارت", "ریستارت", "restart", "تغییر", "آپدیت", "بروزرسانی",
+                   "نصب", "حذف", "پاک", "اصلاح", "درست کن", "رفع", "fix", "stop", "متوقف"]
+    auto_consult = any(w in text for w in RISKY_WORDS)
+    use_consult = force_consult or auto_consult
+
+    if use_consult:
+        send(cfg, "⏳ سؤال پرریسک است — از دو مدل مستقل نظر می‌گیرم...")
+    else:
+        send(cfg, "⏳ در حال بررسی وضعیت سرور...")
+
     context = collect_context(cfg)
-    data, err = ask_brain(cfg, text, context)
 
-    if err:
-        send(cfg, f"❌ {err}")
-        return
-
-    answer = data["answer"]
-    cmd = extract_command(answer)
-    footer = f"\n\n<i>مدل: {data['provider']}</i>"
+    if use_consult:
+        cdata, err = consult_brain(cfg, text, context)
+        if err:
+            # اگر مشورت شکست خورد، به حالت تک‌مدلی برگرد
+            audit("CONSULT_FALLBACK", err)
+            data, err2 = ask_brain(cfg, text, context)
+            if err2:
+                send(cfg, f"❌ {err2}")
+                return
+            answer = data["answer"]
+            cmd = extract_command(answer)
+            footer = f"\n\n<i>مدل: {data['provider']} (مشورت ناموفق بود)</i>"
+        else:
+            return handle_consult_result(cfg, cdata)
+    else:
+        data, err = ask_brain(cfg, text, context)
+        if err:
+            send(cfg, f"❌ {err}")
+            return
+        answer = data["answer"]
+        cmd = extract_command(answer)
+        footer = f"\n\n<i>مدل: {data['provider']}</i>"
 
     if not cmd:
         send(cfg, f"{md_to_html(answer)}{footer}")
@@ -558,6 +630,79 @@ def handle_message(cfg, msg):
     if r.get("ok"):
         PENDING[token]["msg_id"] = r["result"]["message_id"]
     audit("PROPOSED", cmd)
+
+
+def handle_consult_result(cfg, cdata):
+    """نمایش نتیجه مشورت دو مدل و ساخت دکمه تأیید."""
+    agreement = cdata.get("agreement", "unknown")
+    icon, label = AGREEMENT_LABEL.get(agreement, ("⚪", "نامشخص"))
+    results = cdata.get("results", [])
+    cmds = cdata.get("commands", [])
+
+    parts = [f"{icon} <b>مشورت دو مدل</b>\n{label}\n"]
+
+    for r in results:
+        parts.append(
+            f"───────────────\n"
+            f"<b>{r['provider']}</b>\n{md_to_html(r['answer'])}\n"
+        )
+
+    # انتخاب دستور: اگر هم‌نظر بودند اولی، اگر مختلف بودند باز هم اولی ولی با هشدار
+    chosen = None
+    for c in cmds:
+        if c.get("command"):
+            chosen = c["command"]
+            break
+
+    if not chosen:
+        send(cfg, "\n".join(parts))
+        audit("CONSULT", f"{agreement} | بدون دستور")
+        return
+
+    allowed, reason, needs_backup = check_command(chosen)
+
+    if not allowed:
+        audit("BLOCKED", f"{reason} | {chosen}")
+        parts.append(
+            f"───────────────\n🛑 <b>دستور پیشنهادی مسدود شد</b>\n\n"
+            f"دلیل:\n<code>{reason}</code>\n\n<pre>{chosen}</pre>"
+        )
+        send(cfg, "\n".join(parts))
+        return
+
+    if os.path.exists(KILL_SWITCH):
+        parts.append("───────────────\n🔒 اجرا قفل است. برای باز کردن: <code>/on</code>")
+        send(cfg, "\n".join(parts))
+        return
+
+    if not rate_ok():
+        parts.append(f"───────────────\n⚠️ سقف {MAX_EXEC_PER_HOUR} اجرا در ساعت پر شده است.")
+        send(cfg, "\n".join(parts))
+        return
+
+    token = f"c{int(time.time() * 1000) % 100000000}"
+    PENDING[token] = {"cmd": chosen, "needs_backup": needs_backup, "created": time.time()}
+
+    badge = "🟠 تغییردهنده — بکاپ گرفته می‌شود" if needs_backup else "🟢 فقط خواندنی"
+    warn = ""
+    if agreement == "different":
+        warn = "\n⚠️ <b>دو مدل اختلاف نظر دارند.</b> پیش از تأیید، هر دو تحلیل را بخوان.\n"
+
+    parts.append(
+        f"───────────────\n<b>دستور آماده اجراست</b>\n\n"
+        f"<pre>{chosen}</pre>\n{warn}\n"
+        f"نوع: {badge}\nاعتبار: ۵ دقیقه"
+    )
+
+    keyboard = [[
+        {"text": "✅ تأیید و اجرا", "callback_data": f"ok:{token}"},
+        {"text": "❌ لغو", "callback_data": f"no:{token}"},
+    ]]
+
+    r = send(cfg, "\n".join(parts), keyboard)
+    if r.get("ok"):
+        PENDING[token]["msg_id"] = r["result"]["message_id"]
+    audit("CONSULT_PROPOSED", f"{agreement} | {chosen}")
 
 
 def handle_callback(cfg, cb):
