@@ -126,6 +126,31 @@ def redact(text):
     return out
 
 
+def md_to_html(text):
+    """
+    تبدیل مارک‌داون پاسخ مدل به HTML تلگرام.
+    تلگرام در حالت HTML علامت‌های مارک‌داون را نمی‌شناسد و خام نشان می‌دهد.
+    """
+    if not text:
+        return text
+
+    # اول کاراکترهای HTML را ایمن کن، وگرنه پیام رد می‌شود
+    out = text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+
+    # کادر کد چندخطی
+    out = re.sub(
+        r"```(?:bash|sh|text|json)?\s*\n(.*?)```",
+        lambda m: f"<pre>{m.group(1).rstrip()}</pre>",
+        out,
+        flags=re.DOTALL,
+    )
+    # کد تک‌خطی
+    out = re.sub(r"`([^`\n]+)`", r"<code>\1</code>", out)
+    # پررنگ
+    out = re.sub(r"\*\*([^*\n]+)\*\*", r"<b>\1</b>", out)
+    return out
+
+
 def check_command(cmd):
     """
     بررسی ایمنی دستور.
@@ -488,7 +513,7 @@ def handle_message(cfg, msg):
     footer = f"\n\n<i>مدل: {data['provider']}</i>"
 
     if not cmd:
-        send(cfg, f"{answer}{footer}")
+        send(cfg, f"{md_to_html(answer)}{footer}")
         return
 
     allowed, reason, needs_backup = check_command(cmd)
@@ -496,7 +521,7 @@ def handle_message(cfg, msg):
     if not allowed:
         audit("BLOCKED", f"{reason} | {cmd}")
         send(cfg, (
-            f"{answer}\n\n"
+            f"{md_to_html(answer)}\n\n"
             f"🛑 <b>دستور پیشنهادی مسدود شد</b>\n\n"
             f"دلیل:\n<code>{reason}</code>\n\n"
             f"دستور:\n<pre>{cmd}</pre>\n\n"
@@ -505,11 +530,11 @@ def handle_message(cfg, msg):
         return
 
     if os.path.exists(KILL_SWITCH):
-        send(cfg, f"{answer}\n\n🔒 اجرا قفل است. برای باز کردن: <code>/on</code>{footer}")
+        send(cfg, f"{md_to_html(answer)}\n\n🔒 اجرا قفل است. برای باز کردن: <code>/on</code>{footer}")
         return
 
     if not rate_ok():
-        send(cfg, f"{answer}\n\n⚠️ سقف {MAX_EXEC_PER_HOUR} اجرا در ساعت پر شده است.{footer}")
+        send(cfg, f"{md_to_html(answer)}\n\n⚠️ سقف {MAX_EXEC_PER_HOUR} اجرا در ساعت پر شده است.{footer}")
         return
 
     token = f"x{int(time.time() * 1000) % 100000000}"
@@ -522,7 +547,7 @@ def handle_message(cfg, msg):
     ]]
 
     r = send(cfg, (
-        f"{answer}\n\n"
+        f"{md_to_html(answer)}\n\n"
         f"───────────────\n"
         f"<b>دستور آماده اجراست</b>\n\n"
         f"<pre>{cmd}</pre>\n\n"
