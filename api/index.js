@@ -221,8 +221,33 @@ export default async function handler(req) {
 
   if (!prompt) return json({ ok: false, error: "prompt is empty" }, 400);
 
-  // ترتیب تلاش: اگر ارائه‌دهنده خاصی خواسته شده، اول او
-  let order = PROVIDERS.filter(p => process.env[p.envKey]);
+  // ---------------------------------------------------------------
+  // ترتیب تلاش بر اساس نوع کار.
+  //
+  // داده واقعی از تست میدانی: سریع‌ترین ارائه‌دهنده حدود صد میلی‌ثانیه
+  // و کندترین حدود چهار ثانیه پاسخ می‌دهد. ولی سریع‌ترین همیشه
+  // بهترین دستورپذیری را ندارد.
+  //
+  // پس برای کار ساده سرعت مهم است و برای کار دقیق کیفیت.
+  // ---------------------------------------------------------------
+  const mode = body.mode || "balanced";
+
+  const SPEED_ORDER   = ["groq", "mistral", "openrouter", "cerebras", "gemini", "github", "zai", "nvidia"];
+  const QUALITY_ORDER = ["gemini", "github", "mistral", "cerebras", "openrouter", "groq", "nvidia", "zai"];
+
+  const ranking = mode === "fast" ? SPEED_ORDER
+                : mode === "quality" ? QUALITY_ORDER
+                : ["gemini", "groq", "mistral", "openrouter", "cerebras", "github", "zai", "nvidia"];
+
+  let order = PROVIDERS
+    .filter(p => process.env[p.envKey])
+    .sort((a, b) => {
+      const ia = ranking.indexOf(a.name);
+      const ib = ranking.indexOf(b.name);
+      return (ia < 0 ? 99 : ia) - (ib < 0 ? 99 : ib);
+    });
+
+  // ترجیح صریح کاربر بر همه چیز اولویت دارد
   if (prefer) {
     order = [
       ...order.filter(p => p.name === prefer),
@@ -248,7 +273,17 @@ export default async function handler(req) {
       }, 503);
     }
 
-    const picked = order.slice(0, 2);
+    // انتخاب دو مدل از دو خانواده متفاوت.
+    // دو مدل هم‌خانواده معمولاً یک اشتباه را تکرار می‌کنند،
+    // پس ارزش مشورت را از بین می‌برند.
+    const FAMILY = {
+      gemini: "google", github: "openai", groq: "llama",
+      cerebras: "llama", openrouter: "llama",
+      mistral: "mistral", zai: "glm", nvidia: "llama"
+    };
+    const first = order[0];
+    const second = order.find(p => FAMILY[p.name] !== FAMILY[first.name]) || order[1];
+    const picked = [first, second];
     const results = await Promise.all(
       picked.map(async p => {
         try {
