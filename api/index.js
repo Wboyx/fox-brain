@@ -74,8 +74,8 @@ const PROVIDERS = [
   {
     name: "github",
     envKey: "GITHUB_MODELS_TOKEN",
-    url: "https://models.inference.ai.azure.com/chat/completions",
-    model: process.env.GITHUB_MODEL || "gpt-4o",
+    url: "https://models.github.ai/inference/chat/completions",
+    model: process.env.GITHUB_MODEL || "openai/gpt-4o",
     style: "openai",
     tier: "strong",
     good_for: "دسترسی به مدل‌های سطح بالا"
@@ -84,7 +84,7 @@ const PROVIDERS = [
     name: "openrouter",
     envKey: "OPENROUTER_API_KEY",
     url: "https://openrouter.ai/api/v1/chat/completions",
-    model: process.env.OPENROUTER_MODEL || "meta-llama/llama-3.3-70b-instruct:free",
+    model: process.env.OPENROUTER_MODEL || "meta-llama/llama-3.3-70b-instruct",
     style: "openai",
     tier: "varied",
     good_for: "دسترسی به مدل‌های متنوع با یک کلید"
@@ -339,7 +339,7 @@ async function callProvider(p, system, prompt) {
         signal: ctrl.signal
       });
 
-      if (!res.ok) throw new Error(`HTTP ${res.status} ${(await res.text()).slice(0, 150)}`);
+      if (!res.ok) throw new Error(`HTTP ${res.status} ${cleanError(await res.text())}`);
       const d = await res.json();
       const parts = d?.candidates?.[0]?.content?.parts || [];
       return parts.map(x => x.text || "").join("");
@@ -365,11 +365,28 @@ async function callProvider(p, system, prompt) {
       signal: ctrl.signal
     });
 
-    if (!res.ok) throw new Error(`HTTP ${res.status} ${(await res.text()).slice(0, 150)}`);
+    if (!res.ok) throw new Error(`HTTP ${res.status} ${cleanError(await res.text())}`);
     const d = await res.json();
     return d?.choices?.[0]?.message?.content || "";
   } finally {
     clearTimeout(timer);
+  }
+}
+
+// خلاصه‌کردن پیام خطا.
+// برخی سرویس‌ها به‌جای JSON یک صفحه کامل HTML برمی‌گردانند که
+// معمولاً یعنی درخواست اصلاً به API نرسیده و یک لایه محافظ جلویش را گرفته.
+function cleanError(body) {
+  if (!body) return "";
+  const t = body.trim();
+  if (t.startsWith("<") || t.toLowerCase().includes("<!doctype")) {
+    return "پاسخ HTML به‌جای JSON — احتمالاً مسدودسازی یا نشانی اشتباه";
+  }
+  try {
+    const j = JSON.parse(t);
+    return String(j.error?.message || j.message || j.error || t).slice(0, 160);
+  } catch {
+    return t.slice(0, 160);
   }
 }
 
