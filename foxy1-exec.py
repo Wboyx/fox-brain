@@ -36,7 +36,7 @@ AUDIT_LOG = os.path.join(BASE_DIR, "foxy1-exec-audit.log")
 KILL_SWITCH = os.path.join(BASE_DIR, "EXEC_DISABLED")
 BACKUP_ROOT = "/root/foxy1-exec-backups"
 
-VERSION = "5.2.0"
+VERSION = "5.3.0"
 
 # محدودیت‌ها
 EXEC_TIMEOUT = 60          # حداکثر زمان اجرای هر دستور
@@ -390,7 +390,9 @@ SYSTEM_PROMPT = """تو فاکسی هستی — دستیار فنی شخصی ه�
 
 <read>دستور خواندنی</read>
 
-دستور اجرا می‌شود و نتیجه‌اش به تو داده می‌شود، بعد ادامه گفت‌وگو را می‌نویسی. همکار درگیر این مرحله نمی‌شود.
+دستور اجرا می‌شود و نتیجه‌اش به تو داده می‌شود، بعد جواب نهایی را می‌نویسی.
+
+نکته مهم: متنی که کنار برچسب read می‌نویسی به همکار نشان داده نمی‌شود. فقط پاسخ نهایی دیده می‌شود. پس لازم نیست بنویسی «اجازه بده بررسی کنم» — مستقیم برچسب را بزن.
 
 از این برای هر چیزی که لازم داری استفاده کن: وضعیت سرویس، حافظه، دیسک، لاگ، شبکه، پورت‌ها.
 
@@ -543,7 +545,6 @@ def run_agent(cfg, question, mode="balanced"):
         f"وضعیت پایه سرور در این لحظه:\n\n{context_first}"
     )
 
-    visible_parts = []
     read_log = []
     provider = "?"
 
@@ -558,14 +559,13 @@ def run_agent(cfg, question, mode="balanced"):
         # آیا می‌خواهد چیزی را تغییر دهد؟
         ch = CHANGE_TAG.search(answer)
         if ch:
-            visible_parts.append(strip_tags(answer))
-            return "\n\n".join(p for p in visible_parts if p), ch.group(1).strip(), provider, read_log
+            # فقط همین پاسخ نمایش داده می‌شود، نه متن‌های میانی
+            return strip_tags(answer), ch.group(1).strip(), provider, read_log
 
         # آیا می‌خواهد داده بخواند؟
         rd = READ_TAG.search(answer)
         if not rd:
-            visible_parts.append(strip_tags(answer))
-            return "\n\n".join(p for p in visible_parts if p), None, provider, read_log
+            return strip_tags(answer), None, provider, read_log
 
         cmd = rd.group(1).strip()
         allowed, reason, needs_backup = check_command(cmd)
@@ -588,20 +588,20 @@ def run_agent(cfg, question, mode="balanced"):
         read_log.append({"cmd": cmd, "code": code, "took": took})
         audit("AGENT_READ", f"rc={code} t={took}s | {cmd}")
 
-        pre = strip_tags(answer)
-        if pre:
-            visible_parts.append(pre)
-
+        # متن میانی نمایش داده نمی‌شود — جواب نهایی باید کامل باشد
         conversation += (
             f"\n\n---\nتو این را اجرا کردی:\n{cmd}\n\n"
             f"نتیجه (کد خروج {code}):\n{out}\n\n"
-            f"حالا با این اطلاعات به همکار جواب بده. اگر باز هم داده لازم داری "
-            f"یک دستور خواندنی دیگر بزن، وگرنه جواب نهایی را بنویس."
+            f"حالا جواب نهایی را برای همکار بنویس. اگر باز هم داده لازم داری "
+            f"یک دستور خواندنی دیگر بزن.\n\n"
+            f"مهم: فقط همین پاسخ آخر به همکار نشان داده می‌شود، پس کامل و "
+            f"مستقل بنویسش. دوباره سلام نکن و ننویس «اجازه بده بررسی کنم» — "
+            f"بررسی تمام شده، فقط نتیجه را بگو."
         )
 
     # سقف دور پر شد
-    visible_parts.append("چند بار بررسی کردم ولی به نتیجه قطعی نرسیدم. سؤالت را دقیق‌تر بپرس.")
-    return "\n\n".join(p for p in visible_parts if p), None, provider, read_log
+    return ("چند بار بررسی کردم ولی به نتیجه قطعی نرسیدم. "
+            "سؤالت را کمی دقیق‌تر بپرس."), None, provider, read_log
 
 
 def ask_raw(cfg, prompt_text, mode="balanced"):
