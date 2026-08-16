@@ -137,6 +137,62 @@ export default async function handler(req) {
     }
   }
 
+  // ---------------------------------------------------------------
+  // تست تک‌تک ارائه‌دهندگان
+  // دلیل: تنظیم‌بودن کلید به معنی کارکردن نیست. نام مدل ممکن است
+  // منسوخ شده باشد یا حساب دسترسی نداشته باشد.
+  // ---------------------------------------------------------------
+  if (url.pathname === "/test") {
+    const expected = process.env.BRAIN_KEY;
+    if (!expected || req.headers.get("x-brain-key") !== expected) {
+      return json({ ok: false, error: "unauthorized" }, 401);
+    }
+
+    const ready = PROVIDERS.filter(p => process.env[p.envKey]);
+    const started = Date.now();
+
+    const results = await Promise.all(
+      ready.map(async p => {
+        const t0 = Date.now();
+        try {
+          const text = await callProvider(
+            p,
+            "پاسخ کوتاه بده.",
+            "فقط عدد چهار را بنویس، بدون هیچ توضیحی."
+          );
+          const ms = Date.now() - t0;
+          const answer = (text || "").trim();
+          return {
+            provider: p.name,
+            model: p.model,
+            ok: Boolean(answer),
+            ms,
+            sample: answer.slice(0, 40)
+          };
+        } catch (e) {
+          return {
+            provider: p.name,
+            model: p.model,
+            ok: false,
+            ms: Date.now() - t0,
+            error: String(e.message || e).slice(0, 160)
+          };
+        }
+      })
+    );
+
+    const working = results.filter(r => r.ok);
+    const broken = results.filter(r => !r.ok);
+
+    return json({
+      ok: true,
+      total_ms: Date.now() - started,
+      working: working.length,
+      broken: broken.length,
+      results: results.sort((a, b) => (a.ok === b.ok ? a.ms - b.ms : a.ok ? -1 : 1))
+    });
+  }
+
   if (url.pathname !== "/ask" && url.pathname !== "/consult") {
     return json({ ok: false, error: "not found" }, 404);
   }
