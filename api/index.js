@@ -96,7 +96,7 @@ export default async function handler(req) {
     }
   }
 
-  if (url.pathname !== "/ask") {
+  if (url.pathname !== "/ask" && url.pathname !== "/consult") {
     return json({ ok: false, error: "not found" }, 404);
   }
 
@@ -135,6 +135,65 @@ export default async function handler(req) {
 
   if (order.length === 0) {
     return json({ ok: false, error: "no provider configured" }, 503);
+  }
+
+  // ---------------------------------------------------------------
+  // حالت مشورت چندمدلی — برای تصمیم‌های پرریسک
+  // دو ارائه‌دهنده مستقل هم‌زمان پرسیده می‌شوند و نتیجه مقایسه می‌شود.
+  // اختلاف نظر مدل‌ها یک سیگنال مهم است، نه یک مزاحمت.
+  // ---------------------------------------------------------------
+  if (url.pathname === "/consult") {
+    if (order.length < 2) {
+      return json({
+        ok: false,
+        error: "مشورت چندمدلی به حداقل دو ارائه‌دهنده نیاز دارد",
+        available: order.length
+      }, 503);
+    }
+
+    const picked = order.slice(0, 2);
+    const results = await Promise.all(
+      picked.map(async p => {
+        try {
+          const text = await callProvider(p, system, prompt);
+          return { provider: p.name, model: p.model, ok: true, answer: (text || "").trim() };
+        } catch (e) {
+          return { provider: p.name, model: p.model, ok: false, error: String(e.message || e).slice(0, 200) };
+        }
+      })
+    );
+
+    const good = results.filter(r => r.ok && r.answer);
+    if (good.length === 0) {
+      return json({ ok: false, error: "هیچ مدلی پاسخ نداد", results }, 502);
+    }
+
+    // استخراج دستور پیشنهادی هر مدل برای مقایسه
+    const cmds = good.map(r => ({
+      provider: r.provider,
+      command: extractCommand(r.answer)
+    }));
+
+    let agreement = "unknown";
+    if (good.length >= 2) {
+      const a = normalizeCmd(cmds[0].command);
+      const b = normalizeCmd(cmds[1].command);
+      if (!a && !b) agreement = "no_command";
+      else if (a && b && a === b) agreement = "identical";
+      else if (a && b && sameTool(a, b)) agreement = "similar";
+      else agreement = "different";
+    } else {
+      agreement = "single_response";
+    }
+
+    return json({
+      ok: true,
+      mode: "consult",
+      agreement,
+      commands: cmds,
+      results: good,
+      failed: results.filter(r => !r.ok)
+    });
   }
 
   const tried = [];
@@ -215,6 +274,29 @@ async function callProvider(p, system, prompt) {
   } finally {
     clearTimeout(timer);
   }
+}
+
+// استخراج دستور از کادر کد پاسخ مدل
+function extractCommand(answer) {
+  const m = answer.match(/```(?:bash|sh)?\s*\n([\s\S]+?)```/);
+  if (!m) return null;
+  const lines = m[1].trim().split("\n")
+    .map(l => l.trim())
+    .filter(l => l && !l.startsWith("#"));
+  return lines[0] || null;
+}
+
+// یکسان‌سازی برای مقایسه — فاصله اضافه و نقل‌قول اهمیت ندارد
+function normalizeCmd(c) {
+  if (!c) return null;
+  return c.replace(/\s+/g, " ").replace(/['"]/g, "").trim().toLowerCase();
+}
+
+// آیا دو دستور از یک ابزار و یک زیرفرمان استفاده می‌کنند
+function sameTool(a, b) {
+  const pa = a.split(" ").slice(0, 2).join(" ");
+  const pb = b.split(" ").slice(0, 2).join(" ");
+  return pa === pb;
 }
 
 function json(obj, status = 200) {
