@@ -18,12 +18,16 @@ export const config = { runtime: "edge" };
 const HARD_TIMEOUT_MS = 45000;
 
 // ترتیب تلاش. اگر یکی سهمیه‌اش تمام شد، بعدی امتحان می‌شود.
+// نام مدل‌ها با متغیر محیطی قابل تغییر است.
+// دلیل: ارائه‌دهندگان مرتب مدل‌ها را بازنشسته می‌کنند و اگر نام در کد
+// ثابت باشد، روزی بی‌صدا از کار می‌افتد. تجربه واقعی: یک نام مدل
+// یک‌ساله «no longer available» شد و فقط زنجیره جایگزین نجاتش داد.
 const PROVIDERS = [
   {
     name: "groq",
     envKey: "GROQ_API_KEY",
     url: "https://api.groq.com/openai/v1/chat/completions",
-    model: "llama-3.3-70b-versatile",
+    model: process.env.GROQ_MODEL || "llama-3.3-70b-versatile",
     style: "openai",
     good_for: "سریع، کارهای ساده و پرتکرار"
   },
@@ -31,15 +35,17 @@ const PROVIDERS = [
     name: "gemini",
     envKey: "GEMINI_API_KEY",
     url: "https://generativelanguage.googleapis.com/v1beta/models/MODEL:generateContent",
-    model: "gemini-2.5-flash",
+    // اگر این نام هم منسوخ شد، متغیر GEMINI_MODEL را تنظیم کن.
+    // فهرست زنده: مسیر /models را صدا بزن.
+    model: process.env.GEMINI_MODEL || "gemini-3.5-flash",
     style: "gemini",
-    good_for: "تحلیل سنگین، زمینه بزرگ"
+    good_for: "تحلیل سنگین، زمینه بزرگ، دستورپذیری بهتر"
   },
   {
     name: "openrouter",
     envKey: "OPENROUTER_API_KEY",
     url: "https://openrouter.ai/api/v1/chat/completions",
-    model: "meta-llama/llama-3.3-70b-instruct:free",
+    model: process.env.OPENROUTER_MODEL || "meta-llama/llama-3.3-70b-instruct:free",
     style: "openai",
     good_for: "نظر دوم با مدل متفاوت"
   },
@@ -47,7 +53,7 @@ const PROVIDERS = [
     name: "cerebras",
     envKey: "CEREBRAS_API_KEY",
     url: "https://api.cerebras.ai/v1/chat/completions",
-    model: "llama-3.3-70b",
+    model: process.env.CEREBRAS_MODEL || "llama-3.3-70b",
     style: "openai",
     good_for: "توان بالا"
   }
@@ -65,8 +71,28 @@ export default async function handler(req) {
       service: "fox-brain",
       providers_ready: ready,
       providers_missing: PROVIDERS.filter(p => !process.env[p.envKey]).map(p => p.name),
+      models: Object.fromEntries(PROVIDERS.filter(p => process.env[p.envKey]).map(p => [p.name, p.model])),
       auth_required: Boolean(process.env.BRAIN_KEY)
     });
+  }
+
+  // فهرست زنده مدل‌های در دسترس — برای وقتی نام مدلی منسوخ شد
+  if (url.pathname === "/models") {
+    const key = process.env.GEMINI_API_KEY;
+    if (!key) return json({ ok: false, error: "GEMINI_API_KEY not set" }, 503);
+    try {
+      const r = await fetch(
+        `https://generativelanguage.googleapis.com/v1beta/models?key=${encodeURIComponent(key)}`
+      );
+      const d = await r.json();
+      const names = (d.models || [])
+        .filter(m => (m.supportedGenerationMethods || []).includes("generateContent"))
+        .map(m => m.name.replace("models/", ""))
+        .filter(n => n.includes("flash") || n.includes("pro"));
+      return json({ ok: true, current: PROVIDERS[1].model, available: names });
+    } catch (e) {
+      return json({ ok: false, error: String(e.message || e) }, 502);
+    }
   }
 
   if (url.pathname !== "/ask") {
