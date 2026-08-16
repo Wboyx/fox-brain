@@ -36,7 +36,7 @@ AUDIT_LOG = os.path.join(BASE_DIR, "foxy1-exec-audit.log")
 KILL_SWITCH = os.path.join(BASE_DIR, "EXEC_DISABLED")
 BACKUP_ROOT = "/root/foxy1-exec-backups"
 
-VERSION = "3.0.0"
+VERSION = "3.1.0"
 
 # محدودیت‌ها
 EXEC_TIMEOUT = 60          # حداکثر زمان اجرای هر دستور
@@ -647,12 +647,40 @@ def handle_consult_result(cfg, cdata):
             f"<b>{r['provider']}</b>\n{md_to_html(r['answer'])}\n"
         )
 
-    # انتخاب دستور: اگر هم‌نظر بودند اولی، اگر مختلف بودند باز هم اولی ولی با هشدار
+    # ------------------------------------------------------------------
+    # انتخاب دستور در حالت اختلاف نظر.
+    # قانون: محافظه‌کارانه‌ترین گزینه پیشنهاد شود.
+    # دستور خواندنی بر دستور تغییردهنده ارجحیت دارد، چون اگر دو مدل
+    # هم‌نظر نیستند یعنی هنوز تشخیص قطعی نیست و اول باید بررسی کرد.
+    # ------------------------------------------------------------------
+    valid = [c for c in cmds if c.get("command")]
     chosen = None
-    for c in cmds:
-        if c.get("command"):
-            chosen = c["command"]
-            break
+    chosen_by = None
+    safer_note = ""
+
+    if valid:
+        if agreement in ("identical", "similar") or len(valid) == 1:
+            chosen = valid[0]["command"]
+            chosen_by = valid[0]["provider"]
+        else:
+            # اختلاف نظر — دستورهای خواندنی را جدا کن
+            readonly = []
+            mutating = []
+            for c in valid:
+                ok, _, needs_bk = check_command(c["command"])
+                (mutating if needs_bk else readonly).append(c)
+
+            if readonly and mutating:
+                chosen = readonly[0]["command"]
+                chosen_by = readonly[0]["provider"]
+                safer_note = (
+                    f"\nℹ️ چون دو مدل اختلاف نظر دارند، دستور محافظه‌کارانه‌تر "
+                    f"از <b>{chosen_by}</b> انتخاب شد. "
+                    f"دستور تغییردهنده <b>{mutating[0]['provider']}</b> پیشنهاد نشد.\n"
+                )
+            else:
+                chosen = valid[0]["command"]
+                chosen_by = valid[0]["provider"]
 
     if not chosen:
         send(cfg, "\n".join(parts))
@@ -689,8 +717,9 @@ def handle_consult_result(cfg, cdata):
         warn = "\n⚠️ <b>دو مدل اختلاف نظر دارند.</b> پیش از تأیید، هر دو تحلیل را بخوان.\n"
 
     parts.append(
-        f"───────────────\n<b>دستور آماده اجراست</b>\n\n"
-        f"<pre>{chosen}</pre>\n{warn}\n"
+        f"───────────────\n<b>دستور آماده اجراست</b>\n"
+        f"<i>انتخاب‌شده از: {chosen_by}</i>\n\n"
+        f"<pre>{chosen}</pre>\n{safer_note}{warn}\n"
         f"نوع: {badge}\nاعتبار: ۵ دقیقه"
     )
 
