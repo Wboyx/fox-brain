@@ -36,7 +36,7 @@ AUDIT_LOG = os.path.join(BASE_DIR, "foxy1-exec-audit.log")
 KILL_SWITCH = os.path.join(BASE_DIR, "EXEC_DISABLED")
 BACKUP_ROOT = "/root/foxy1-exec-backups"
 
-VERSION = "5.0.0"
+VERSION = "5.1.0"
 
 # محدودیت‌ها
 EXEC_TIMEOUT = 60          # حداکثر زمان اجرای هر دستور
@@ -1151,6 +1151,117 @@ def selftest():
     return fails == 0
 
 
+# =====================================================================
+# دیده‌بان رویداد
+#
+# پایشگر رویدادها را در یک فایل صف می‌نویسد. اینجا برداشته می‌شوند و
+# دستیار با زبان طبیعی توضیحشان می‌دهد، به‌جای هشدار خام.
+#
+# اگر مدل در دسترس نباشد، متن خام فرستاده می‌شود تا هشدار گم نشود.
+# =====================================================================
+
+INCIDENT_QUEUE = os.path.join(BASE_DIR, "incidents.jsonl")
+
+INCIDENT_PROMPT = """یک رویداد روی سرور همکار رخ داده و پایشگر آن را ثبت کرده است.
+
+وظیفه تو: این رویداد را با زبان ساده برای همکار توضیح بده.
+
+قالب پاسخ:
+
+یک یا دو جمله که بگوید چه شده و چقدر جدی است.
+سپس اگر علتش را می‌دانی، کوتاه بگو.
+سپس بگو چه باید کرد.
+
+اگر برای فهمیدن علت به داده بیشتری نیاز داری، یک دستور خواندنی با برچسب read بزن.
+
+لحن آرام باشد، نه هشدارآمیز. همکار نباید بترسد، باید بفهمد.
+حداکثر هشت خط بنویس."""
+
+
+def read_incidents():
+    """برداشتن رویدادهای صف. فایل بلافاصله خالی می‌شود تا تکراری خوانده نشود."""
+    if not os.path.exists(INCIDENT_QUEUE):
+        return []
+    try:
+        with open(INCIDENT_QUEUE, "r", encoding="utf-8") as fh:
+            lines = [l.strip() for l in fh if l.strip()]
+        open(INCIDENT_QUEUE, "w").close()
+        out = []
+        for l in lines:
+            try:
+                out.append(json.loads(l))
+            except Exception:
+                pass
+        return out
+    except Exception as exc:
+        audit("INCIDENT_READ_ERROR", str(exc))
+        return []
+
+
+def report_incident(cfg, inc):
+    """توضیح یک رویداد با زبان طبیعی."""
+    icon = {"crit": "🔴", "warn": "🟠", "ok": "🟢"}.get(inc.get("severity"), "🔵")
+    title = inc.get("title", "رویداد")
+    body = inc.get("body", "")
+
+    prompt = (
+        f"{INCIDENT_PROMPT}\n\n"
+        f"---\nعنوان رویداد: {title}\n"
+        f"شدت: {inc.get('severity')}\n"
+        f"جزئیات:\n{body}\n"
+    )
+
+    try:
+        data, err = ask_raw(cfg, prompt, mode="balanced")
+    except Exception as exc:
+        data, err = None, str(exc)
+
+    if err or not data:
+        # مدل در دسترس نیست — هشدار خام بفرست تا گم نشود
+        send(cfg, f"{icon} <b>{title}</b>\n\n{body}")
+        audit("INCIDENT_RAW", f"{title} | {err}")
+        return
+
+    answer = data["answer"]
+
+    # اگر خواست داده بخواند، اجازه بده
+    rd = READ_TAG.search(answer)
+    if rd:
+        cmd = rd.group(1).strip()
+        allowed, reason, needs_backup = check_command(cmd)
+        if allowed and not needs_backup:
+            code, out, took = execute(cmd)
+            out = redact(strip_foreign(out))[:1500] or "(بدون خروجی)"
+            audit("INCIDENT_READ", f"rc={code} | {cmd}")
+            follow = (
+                f"{prompt}\n\nتو این را اجرا کردی:\n{cmd}\n\n"
+                f"نتیجه:\n{out}\n\nحالا توضیح نهایی را برای همکار بنویس."
+            )
+            data2, err2 = ask_raw(cfg, follow, mode="balanced")
+            if data2:
+                answer = data2["answer"]
+
+    text = strip_tags(answer)
+    history_add("assistant", f"هشدار: {title} — {text[:150]}")
+    send(cfg, f"{icon} <b>{title}</b>\n\n{md_to_html(text)}")
+    audit("INCIDENT_REPORTED", title)
+
+
+def incident_watcher(cfg):
+    """حلقه پس‌زمینه — هر ۳۰ ثانیه صف را بررسی می‌کند."""
+    while True:
+        try:
+            for inc in read_incidents():
+                try:
+                    report_incident(cfg, inc)
+                except Exception as exc:
+                    audit("INCIDENT_ERROR", str(exc))
+                time.sleep(2)
+        except Exception as exc:
+            audit("WATCHER_ERROR", str(exc))
+        time.sleep(30)
+
+
 def main():
     import sys
     if "--selftest" in sys.argv:
@@ -1169,9 +1280,14 @@ def main():
         f"🦊 <b>فاکسی 1 فاز دو فعال شد</b>\n\n"
         f"نسخه: <code>{VERSION}</code>\n"
         f"سرور: <code>{run('hostname')}</code>\n\n"
-        f"سؤالت را بنویس. هیچ دستوری بدون تأیید تو اجرا نمی‌شود.\n"
+        f"سؤالت را بنویس. اگر مشکلی روی سرور پیش بیاید، خودم خبرت می‌کنم.\n"
         f"قفل اضطراری: <code>/off</code>"
     ))
+
+    import threading
+    t = threading.Thread(target=incident_watcher, args=(cfg,), daemon=True)
+    t.start()
+    audit("WATCHER_START", "incident watcher active")
 
     offset = 0
     while True:
