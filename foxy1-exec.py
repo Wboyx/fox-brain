@@ -36,7 +36,7 @@ AUDIT_LOG = os.path.join(BASE_DIR, "foxy1-exec-audit.log")
 KILL_SWITCH = os.path.join(BASE_DIR, "EXEC_DISABLED")
 BACKUP_ROOT = "/root/foxy1-exec-backups"
 
-VERSION = "4.0.0"
+VERSION = "4.1.0"
 
 # محدودیت‌ها
 EXEC_TIMEOUT = 60          # حداکثر زمان اجرای هر دستور
@@ -510,7 +510,34 @@ MAX_HISTORY_TURNS = 6     # حداکثر نوبت نگهداری
 HISTORY_TTL = 1800        # اعتبار حافظه به ثانیه، نیم ساعت
 
 
+def summarize_answer(text):
+    """
+    فشرده‌سازی پاسخ مدل برای حافظه.
+    فقط جمله تشخیص نگه داشته می‌شود، نه تعارف و توضیح اضافه.
+    دلیل: حافظه پرحجم توکن مصرف می‌کند و مهم را زیر شلوغی دفن می‌کند.
+    """
+    if not text:
+        return ""
+
+    # حذف کادرهای کد — دستور جداگانه ذخیره می‌شود
+    t = re.sub(r"```.*?```", "", text, flags=re.DOTALL)
+
+    # برداشتن بخش تشخیص اگر وجود دارد
+    m = re.search(r"تشخیص\s*:\s*(.+?)(?:\n\s*\n|دستور\s*:|$)", t, re.DOTALL)
+    if m:
+        t = m.group(1)
+
+    # حذف تعارف‌های ابتدایی
+    t = re.sub(r"^\s*(سلام\s+)?همکار(\s+گرامی|\s+عزیز)?[،.:]?\s*", "", t.strip())
+
+    t = re.sub(r"\s+", " ", t).strip()
+    return t[:220]
+
+
 def history_add(role, text, cmd=None, output=None):
+    if role == "assistant":
+        text = summarize_answer(text)
+
     HISTORY.append({
         "role": role,
         "text": (text or "")[:600],
@@ -612,6 +639,8 @@ def handle_message(cfg, msg):
             age = int((time.time() - h["at"]) / 60)
             who = "شما" if h["role"] == "user" else "فاکسی"
             lines.append(f"[{age}د] {who}: {h['text'][:70]}")
+            if h.get("cmd"):
+                lines.append(f"      ↳ {h['cmd'][:60]}")
         send(cfg, f"<b>حافظه گفت‌وگو</b>\n\n<pre>" + "\n".join(lines) + "</pre>")
         return
 
