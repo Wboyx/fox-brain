@@ -368,7 +368,7 @@ SYSTEM_PROMPT = """تو فاکسی 1 هستی، دستیار فنی سرور.
 پاسخ حداکثر دوازده خط باشد."""
 
 
-def ask_brain(cfg, question, context):
+def ask_brain(cfg, question, context, mode="balanced"):
     if not cfg["brain_url"] or not cfg["brain_key"]:
         return None, "دروازه مدل تنظیم نشده است."
 
@@ -378,6 +378,7 @@ def ask_brain(cfg, question, context):
     payload = json.dumps({
         "system": SYSTEM_PROMPT,
         "prompt": f"زمان فعلی: {now}\n\n{hist_part}سؤال همکار:\n{question}\n\nوضعیت سرور:\n\n{context}",
+        "mode": mode,
     }).encode("utf-8")
 
     req = urllib.request.Request(
@@ -695,7 +696,11 @@ def handle_message(cfg, msg):
         else:
             return handle_consult_result(cfg, cdata)
     else:
-        data, err = ask_brain(cfg, text, context)
+        # سؤال کوتاه و ساده نیازی به مدل کند ندارد
+        simple = len(text) < 60 and not any(
+            w in text for w in ["چرا", "تحلیل", "بررسی عمیق", "مقایسه", "علت"]
+        )
+        data, err = ask_brain(cfg, text, context, mode="fast" if simple else "balanced")
         if err:
             send(cfg, f"❌ {err}")
             return
